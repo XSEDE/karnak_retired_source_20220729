@@ -1,0 +1,257 @@
+#!/usr/bin/env python
+
+###############################################################################
+#   Copyright 2015 The University of Texas at Austin                          #
+#                                                                             #
+#   Licensed under the Apache License, Version 2.0 (the "License");           #
+#   you may not use this file except in compliance with the License.          #
+#   You may obtain a copy of the License at                                   #
+#                                                                             #
+#       http://www.apache.org/licenses/LICENSE-2.0                            #
+#                                                                             #
+#   Unless required by applicable law or agreed to in writing, software       #
+#   distributed under the License is distributed on an "AS IS" BASIS,         #
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  #
+#   See the License for the specific language governing permissions and       #
+#   limitations under the License.                                            #
+###############################################################################
+
+import copy
+import datetime
+import json
+import logging
+import logging.config
+import os
+import ssl
+import sys
+import time
+import traceback
+
+import amqp
+
+from karnak.daemon import Daemon
+from karnak.database import Glue2Database
+from karnak.job import *
+
+karnak_path = "/home/karnak/karnak"
+logging.config.fileConfig(os.path.join(karnak_path,"etc","logging.conf"))
+
+logger = logging.getLogger("karnak.archive")
+
+#######################################################################################################################
+
+class Archiver(Daemon):
+    def __init__(self):
+        Daemon.__init__(self,
+                        pidfile=os.path.join(karnak_path,"var","archive.pid"),
+                        stdout=os.path.join(karnak_path,"var","archive.log"),
+                        stderr=os.path.join(karnak_path,"var","archive.log"))
+        self.connection = None
+        self.channel = None
+        #self.db = Glue2Database(True)  # cache jobs for better performance (not significant)
+        self.db = Glue2Database()
+
+    def run(self):
+        #db = Glue2Database()
+        #db.connect()
+        #db.createTables()
+        #db.close()
+        #sys.exit(0)
+
+        while True:
+            if not self.connection:
+                try:
+                    self._connect("infopub.xsede.org")
+                except:
+                    traceback.print_exc()
+                    self._connect("infopub-alt.xsede.org")
+            self.channel.wait()
+
+    def _connect(self, host):
+        logger.info("connecting to %s" % host)
+        ssl_options = {"cert_reqs": ssl.CERT_REQUIRED,
+                       "ca_certs": "/home/karnak/karnak/etc/cacerts.pem"}
+        self.connection = amqp.Connection(host=host+":5671",
+                                          userid="karnak",
+                                          password="<DELETED>",
+                                          virtual_host="xsede",
+                                          ssl=ssl_options)
+        self.channel = self.connection.channel()
+
+        logger.info("_connect consuming")
+
+        # testing
+        #declare_ok = self.channel.queue_declare()
+        #activities_queue = declare_ok.queue
+        #self.channel.queue_bind(activities_queue,"glue2.computing_activities","#")
+        #self.channel.basic_consume(activities_queue,callback=self._queueMessage)
+
+        # testing
+        #declare_ok = self.channel.queue_declare()
+        #activity_queue = declare_ok.queue
+        #self.channel.queue_bind(activity_queue,"glue2.computing_activity","#")
+        #self.channel.basic_consume(activity_queue,callback=self._jobMessage)
+
+        # assumes that these durable queues have been created and bound to glue2 exchanges
+        self.channel.basic_qos(prefetch_size=0, prefetch_count=5, a_global=False)
+        self.channel.basic_consume("karnak.archive.activities",callback=self._queueMessage)
+        self.channel.basic_consume("karnak.archive.activity",callback=self._jobMessage)
+
+    def _connectX509(self, host):
+        logger.info("connecting to %s" % host)
+        ssl_options = {"keyfile": "/home/karnak/karnak/etc/serverkey.pem",
+                       "certfile": "/home/karnak/karnak/etc/servercert.pem",
+                       "cert_reqs": ssl.CERT_REQUIRED,
+                       "ca_certs": "/home/karnak/karnak/etc/cacerts.pem"}
+        self.connection = amqp.Connection(host=host+":5671",
+                                          virtual_host="xsede",
+                                          ssl=ssl_options)
+        self.channel = self.connection.channel()
+
+        logger.info("_connectSecure consuming")
+
+        self.channel.basic_qos(prefetch_size=0, prefetch_count=5, a_global=False)
+        self.channel.basic_consume("karnak.archive.activities",callback=self._queueMessage)
+        self.channel.basic_consume("karnak.archive.activity",callback=self._jobMessage)
+
+    def _queueMessage(self, message):
+        routing_key = message.delivery_info["routing_key"]
+        content = message.body
+
+        logger.info("queue message for %s" % routing_key)
+        # if there are no jobs, there isn't any metadata (like at what time there were no jobs)
+        #   include the ComputingService to give context?
+        self.db.connect()
+        try:
+            state = self._toQueueState(routing_key,content)
+            self._handleQueueState(state)
+        except Exception:
+            logger.error(traceback.format_exc())
+        self.db.close()
+        logger.info("done with queue message for %s" % routing_key)
+        self.channel.basic_ack(message.delivery_tag)
+
+    def _jobMessage(self, message):
+        routing_key = message.delivery_info["routing_key"]
+        content = message.body
+
+        logger.info("job message %s",routing_key)
+#       logger.info(content)
+        doc = json.loads(content)
+        job = Job()
+        try:
+            system = ".".join(routing_key.split(".")[2:]) # drop job id and user
+            system = system.replace("teragrid.org","xsede.org")
+            job.fromGlue2Json(system,doc)
+        except Exception, e:
+            logger.error(str(e))
+        else:
+            self.db.connect()
+            try:
+                if self.db.updateJob(job) and job.start_time is not None:
+                    self.db.writeStartedJob(job)
+            except:
+                logger.error("failed to update job: %s",traceback.format_exc())
+            self.db.close()
+        logger.debug("done with job message %s",routing_key)
+        self.channel.basic_ack(message.delivery_tag)
+
+    def _toQueueState(self, system, content):
+        state = QueueState()
+        state.system = system
+        doc = json.loads(content)
+        for act_doc in doc.get("ComputingActivity",[]):
+            job = Job()
+            try:
+                job.fromGlue2Json(system,act_doc)
+            except Exception, e:
+                logger.error(str(e))
+            else:
+                state.job_ids.append(job.id)
+                state.jobs[job.id] = job
+
+        if len(state.jobs) > 0:
+            state.time = state.jobs.values()[0].time # assume all jobs in a snapshot have the same time
+        else:
+            logger.warning("no jobs in JSON message from %s -  can't compute current time, assuming current time",
+                           system)
+            state.time = datetime.datetime.utcnow()
+            
+        return state
+
+    # It would be good to speed this up a bit. It is staying ahead of incoming messages, but not very far ahead.
+    #   * use a cache of job information?
+    def _handleQueueState(self, state):
+        self._teraGridToXsede(state)
+        logger.info("  %d jobs from %s at %s" % (len(state.jobs),state.system,state.time.isoformat()))
+
+        logger.debug("    reading queue state before")
+        last_state = self.db.readQueueStateBefore(state.system,state.time)
+        if last_state is None:
+            last_state = QueueState()
+
+        logger.debug("    reading jobs in last state")
+        for job in self.db.readJobs(last_state.system,last_state.job_ids):
+            last_state.jobs[job.id] = job
+
+        # generate new jobs and update existing jobs
+        logger.debug("    updating jobs")
+        for job in state.jobs.values():
+            if job == last_state.jobs.get(job.id):
+                # no new information, so nothing to do
+                logger.debug("no new info for job %s on %s",job.id,job.system)
+                continue
+            try:
+                if self.db.updateJob(job,last_state.jobs.get(job.id,None)) and job.start_time is not None:
+                    # job was updated in the database and it has a start time
+                    self.db.writeStartedJob(job)
+            except:
+                logger.error(traceback.format_exc())
+
+        # update jobs that disappeared
+        for id in last_state.job_ids:
+            if id in state.jobs:
+                # we know about this job - it didn't disappear
+                continue
+            if id not in last_state.jobs:  # jobs could be missing
+                continue
+            if last_state.jobs[id].state == Job.DONE:
+                # job was done in last state, so it didn't disappear
+                continue
+            job = copy.copy(last_state.jobs[id])
+            job.state = Job.DISAPPEARED
+            job.time = state.time
+            job.end_time = state.time
+            logger.debug("job %s on %s disappeared",job.id,job.system)
+            self.db.updateJob(job)
+
+        logger.debug("  writing queue state")
+        try:
+            self.db.writeQueueState(state)
+        except Exception:
+            logger.error("failed to write queue state: %s",traceback.format_exc())
+
+        logger.debug("  writing last queue state and jobs")
+        logger.info("  writing last queue state")
+        try:
+            self.db.writeLastQueueState(state)
+        except Exception, e:
+            logger.error("failed to write last queue state: %s",e)
+            traceback.print_exc()
+        logger.info("  writing last jobs")
+        # writeLastJobs can be slow (10-20 seconds) with lots of jobs
+        #self.db.writeLastJobs(state.system,state.jobs.values())
+        # updating the last jobs is much faster than deleting and writing them
+        self.db.updateLastJobs(state.system,state.jobs.values())
+
+    def _teraGridToXsede(self, state):
+        state.system = state.system.replace("teragrid.org","xsede.org")
+        for job in state.jobs.values():
+            job.system = state.system
+
+#######################################################################################################################
+
+if __name__ == "__main__":
+    daemon = Archiver()
+    daemon.start()
+    #daemon.run()

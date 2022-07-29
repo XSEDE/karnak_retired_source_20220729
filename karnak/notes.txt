@@ -1,0 +1,45 @@
+
+
+# yum install mariadb-server
+# yum install python-amqp
+# yum install MySQL-python
+# yum install pytz
+# yum install sbt-0.13.8.rpm 
+# yum install apache-commons-daemon-jsvc
+
+installed openjdk, too
+
+
+With last queue state and jobs:
+
+2015-04-30 09:38:48,721 - karnak.archive - INFO - queue message for stampede.tacc.xsede.org
+2015-04-30 09:38:49,111 - karnak.archive - INFO -   2596 jobs from stampede.tacc.xsede.org at 2015-04-29T15:46:07
+2015-04-30 09:38:50,135 - karnak.archive - ERROR - failed to write queue state: Traceback (most recent call last):
+  File "/home/karnak/karnak/python/libexec/archive.py", line 226, in _handleQueueState
+    db.writeQueueState(state)
+  File "/home/karnak/karnak/python/lib/karnak/database.py", line 211, in writeQueueState
+    cursor.execute("insert into queue_states values ("+state.toSql()+")")
+  File "/usr/lib64/python2.7/site-packages/MySQLdb/cursors.py", line 174, in execute
+    self.errorhandler(self, exc, value)
+  File "/usr/lib64/python2.7/site-packages/MySQLdb/connections.py", line 36, in defaulterrorhandler
+    raise errorclass, errorvalue
+IntegrityError: (1062, "Duplicate entry 'stampede.tacc.xsede.org-2015-04-29 15:46:07' for key 'PRIMARY'")
+
+2015-04-30 09:38:50,135 - karnak.archive - INFO - writing last queue state
+2015-04-30 09:38:50,157 - karnak.archive - INFO - writing last jobs
+2015-04-30 09:39:10,789 - karnak.archive - INFO - done with queue message for stampede.tacc.xsede.org
+
+With reading directly:
+
+2015-04-30 09:53:24,992 - karnak.archive - INFO - queue message for stampede.tacc.xsede.org
+2015-04-30 09:53:25,379 - karnak.archive - INFO -   2616 jobs from stampede.tacc.xsede.org at 2015-04-29T16:44:07
+2015-04-30 09:53:25,379 - karnak.archive - INFO - reading queue state before
+2015-04-30 09:53:25,381 - karnak.archive - INFO - reading jobs in last state
+2015-04-30 09:53:25,428 - karnak.database - WARNING - couldn't read job 5184732 on stampede.tacc.xsede.org
+2015-04-30 09:53:25,449 - karnak.database - WARNING - couldn't read job 5184735 on stampede.tacc.xsede.org
+2015-04-30 09:53:25,490 - karnak.database - WARNING - couldn't read job 5184734 on stampede.tacc.xsede.org
+2015-04-30 09:53:25,745 - karnak.database - WARNING - couldn't read job 5184733 on stampede.tacc.xsede.org
+2015-04-30 09:53:25,818 - karnak.database - WARNING - couldn't read job 5184729 on stampede.tacc.xsede.org
+2015-04-30 09:53:26,392 - karnak.database - WARNING - couldn't read job 5184730 on stampede.tacc.xsede.org
+2015-04-30 09:53:26,393 - karnak.database - WARNING - couldn't read job 5184731 on stampede.tacc.xsede.org
+2015-04-30 09:53:27,136 - karnak.archive - INFO - done with queue message for stampede.tacc.xsede.org

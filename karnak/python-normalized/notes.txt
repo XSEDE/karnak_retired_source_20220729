@@ -1,0 +1,15 @@
+2014-08-08 07:10:03,109 - carnac.sysinfo - INFO - connecting to info2.dyn.teragrid.org
+Traceback (most recent call last):
+  File "/home/karnak/carnac/libexec/sysinfo.py", line 216, in <module>
+    daemon.start()
+  File "/home/karnak/pkg/ipf/lib/ipf/daemon.py", line 40, in start
+    self.run()
+  File "/home/karnak/carnac/libexec/sysinfo.py", line 68, in run
+    self._connectSecure("info2.dyn.teragrid.org")
+  File "/home/karnak/carnac/libexec/sysinfo.py", line 101, in _connectSecure
+    self.xsede_channel.basicConsume(self._jsonMessage,"carnac.sysinfo",no_ack=False)
+  File "/home/karnak/pkg/mtk/lib/mtk/amqp_0_9_1/channel.py", line 304, in basicConsume
+    consume_ok = self._send(consume)
+  File "/home/karnak/pkg/mtk/lib/mtk/amqp_0_9_1/channel.py", line 105, in _send
+    raise MtkError(response.reply_text)
+mtk.amqp_0_9_1.error.MtkError: "NOT_FOUND - home node 'rabbit@info1' of durable queue 'carnac.sysinfo' in vhost 'xsede' is down or inaccessible"

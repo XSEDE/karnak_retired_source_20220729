@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/home/karnak/karnak/python/libexec/archive.py", line 243, in <module>
+    daemon.start()
+  File "/home/karnak/karnak/python/lib/karnak/daemon.py", line 122, in start
+    self.run()
+  File "/home/karnak/karnak/python/libexec/archive.py", line 46, in run
+    except MtkError:
+NameError: global name 'MtkError' is not defined

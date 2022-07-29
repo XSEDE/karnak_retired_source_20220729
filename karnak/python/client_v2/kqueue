@@ -1,0 +1,116 @@
+#!/usr/bin/env python
+
+###############################################################################
+#   Copyright 2010 The University of Texas at Austin                          #
+#                                                                             #
+#   Licensed under the Apache License, Version 2.0 (the "License");           #
+#   you may not use this file except in compliance with the License.          #
+#   You may obtain a copy of the License at                                   #
+#                                                                             #
+#       http://www.apache.org/licenses/LICENSE-2.0                            #
+#                                                                             #
+#   Unless required by applicable law or agreed to in writing, software       #
+#   distributed under the License is distributed on an "AS IS" BASIS,         #
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  #
+#   See the License for the specific language governing permissions and       #
+#   limitations under the License.                                            #
+###############################################################################
+
+# Example usage
+# rcac-10-132-7-252:client_v2 wooj$ ./kqueue -t normal@stampede.tacc.xsede.org
+# --------------------------- normal on stampede.tacc.xsede.org ---------------------------
+
+#                        ----------------- Status ------------------
+#                        Running Jobs  Waiting Jobs  Used Processors
+#                        -------------------------------------------
+#                            921           772            94400
+
+# ------------------------------------- Started Jobs --------------------------------------
+#      When        Number of     Mean     Mean Requested Wall Time      Mean Wait Time
+#                    Jobs     Processors  (hours:minutes:seconds)   (hours:minutes:seconds)
+# -----------------------------------------------------------------------------------------
+#       last hour       92        66              16:12:08                 09:33:04
+# last four hours      307       160              16:44:29                 09:08:15
+#        last day     2236       123              20:41:11                 08:55:51
+#       last week    18952       112              17:37:01                 04:04:43
+
+# ------------------------------------ Completed Jobs -------------------------------------
+#      When        Number of     Mean     Mean Requested Wall Time      Mean Wall Time
+#                    Jobs     Processors  (hours:minutes:seconds)   (hours:minutes:seconds)
+# -----------------------------------------------------------------------------------------
+#       last hour      113        48              15:40:04                 02:11:34
+# last four hours      348       132              20:04:52                 07:23:30
+#        last day     2213       124              21:57:48                 07:10:57
+#       last week    19346       110              18:05:26                 06:41:21
+
+
+
+import getopt
+import httplib
+import os
+import sys
+
+if "KARNAK_HOST" in os.environ:
+    host = os.environ["KARNAK_HOST"]
+else:
+    host = "karnak.teragrid.org"
+
+if "KARNAK_PORT" in os.environ:
+    port = int(os.environ["KARNAK_PORT"])
+else:
+    port = 80
+
+
+def usage():
+    print("usage: kqueue [--help | [--text | --xml | --html]] [queue@]<system>")
+    print("  --help          prints this help message")
+    print("  -t or --text    requests output formatted as plain text (default")
+    print("  -x or --xml     requests output formatted as XML")
+    print("  -h or --html    requests output formatted as HTML")
+    print("  system          the name of the batch scheduled system (required)")
+    print("  queue           the name of the queue on the system (optional)")
+
+
+if __name__ == "__main__":
+    try:
+        opts, args = getopt.gnu_getopt(sys.argv[1:], "txh", ["text", "xml", "html","help"])
+    except getopt.GetoptError, err:
+        print str(err)
+        usage()
+        sys.exit(2)
+
+    format = "txt"
+    for opt, arg in opts:
+        if opt == "--help":
+            usage()
+            sys.exit(0)
+        elif opt in ("-t", "--text"):
+            format = "txt"
+        elif opt in ("-x", "--xml"):
+            format = "xml"
+        elif opt in ("-h", "--html"):
+            format = "html"
+        else:
+            assert False, "unhandled option"
+
+    if len(args) != 1:
+        usage()
+        sys.exit(1)
+
+    toks = args[0].split("@")
+    if len(toks) > 2:
+        usage()
+        sys.exit(1)
+
+    conn = httplib.HTTPConnection(host,port)
+    if len(toks) == 2:
+        conn.request("GET","/karnak/system/"+toks[1]+"/queue/"+toks[0]+"/summary."+format)
+    else:
+        conn.request("GET","/karnak/system/"+toks[0]+"/queue/all_jobs/summary."+format)
+    r = conn.getresponse()
+    data = r.read()
+    conn.close()
+    if r.status != httplib.OK:
+        print ("request failed: "+r.reason+" ("+str(r.status)+")")
+        sys.exit(1)
+    print(data)

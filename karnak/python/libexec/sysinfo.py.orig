@@ -1,0 +1,184 @@
+#!/usr/bin/env python
+
+###############################################################################
+#   Copyright 2015 The University of Texas at Austin                          #
+#                                                                             #
+#   Licensed under the Apache License, Version 2.0 (the "License");           #
+#   you may not use this file except in compliance with the License.          #
+#   You may obtain a copy of the License at                                   #
+#                                                                             #
+#       http://www.apache.org/licenses/LICENSE-2.0                            #
+#                                                                             #
+#   Unless required by applicable law or agreed to in writing, software       #
+#   distributed under the License is distributed on an "AS IS" BASIS,         #
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  #
+#   See the License for the specific language governing permissions and       #
+#   limitations under the License.                                            #
+###############################################################################
+
+import calendar
+import datetime
+import json
+import logging
+import logging.config
+import os
+import ssl
+import sys
+import time
+import traceback
+import xml.dom
+import xml.dom.minidom
+
+import amqp
+
+from karnak.daemon import Daemon
+from karnak.database import Glue2Database
+from karnak.job import *
+from karnak.util import *
+
+karnak_path = "/home/karnak/karnak"
+logging.config.fileConfig(os.path.join(karnak_path,"etc","logging.conf"))
+
+logger = logging.getLogger("karnak.sysinfo")
+    
+#######################################################################################################################
+
+def getText(doc, tag):
+    nodes = doc.getElementsByTagName(tag)
+    if len(nodes) < 1:
+        return ""
+    if nodes[0].firstChild == None:
+        return ""
+    if nodes[0].firstChild.data == None:
+        return ""
+    return nodes[0].firstChild.data
+
+def getAttribute(doc, element, attribute):
+    nodes = doc.getElementsByTagName(element)
+    if len(nodes) < 1:
+        return ""
+    return nodes[0].getAttribute(attribute)
+
+#######################################################################################################################
+
+class SysInfo(Daemon):
+    def __init__(self):
+        Daemon.__init__(self,
+                        pidfile=os.path.join(karnak_path,"var","sysinfo.pid"),
+                        stdout=os.path.join(karnak_path,"var","sysinfo.log"),
+                        stderr=os.path.join(karnak_path,"var","sysinfo.log"))
+        self.connection = None
+        self.channel = None
+        
+    def run(self):
+        while True:
+            if not self.connection:
+                try:
+                    self._connect("infopub.xsede.org")
+                except:
+                    traceback.print_exc()
+                    self._connect("infopub-alt.xsede.org")
+            self.channel.wait()
+
+    def _connect(self, host):
+        logger.info("connecting to %s" % host)
+        ssl_options = {"cert_reqs": ssl.CERT_REQUIRED,
+                       "ca_certs": "/home/karnak/karnak/etc/cacerts.pem"}
+        self.connection = amqp.Connection(host=host+":5671",
+                                          userid="karnak",
+                                          password="<DELETED>",
+                                          virtual_host="xsede",
+                                          ssl=ssl_options)
+        self.channel = self.connection.channel()
+
+        # testing
+        #declare_ok = self.channel.queue_declare()
+        #compute_queue = declare_ok.queue
+        #self.channel.queue_bind(compute_queue,"glue2.compute","#")
+        #self.channel.basic_consume(compute_queue,callback=self._computeMessage)
+
+	self.channel.basic_qos(prefetch_size=0, prefetch_count=50, a_global=False)
+        self.channel.basic_consume("karnak.sysinfo",callback=self._computeMessage)
+
+    def _connectX509(self, host):
+        logger.info("connecting to %s" % host)
+        ssl_options = {"keyfile": "/home/karnak/karnak/etc/serverkey.pem",
+                       "certfile": "/home/karnak/karnak/etc/servercert.pem",
+                       "cert_reqs": ssl.CERT_REQUIRED,
+                       "ca_certs": "/home/karnak/karnak/etc/cacerts.pem"}
+        self.connection = amqp.Connection(host=host+":5671",
+                                          virtual_host="xsede",
+                                          ssl=ssl_options)
+        self.channel = self.connection.channel()
+
+        logger.info("_connectSecure consuming from carnac.archive")
+        self.channel.basic_consume("carnac.tmp.sysinfo",callback=self._computeMessage)
+
+    def _computeMessage(self, message):
+        routing_key = message.delivery_info["routing_key"]
+        content = message.body
+
+        logger.info("JSON compute message for %s" % routing_key)
+        system = self._jsonToSystem(routing_key,content)
+        self._updateSystem(system)
+        self.channel.basic_ack(message.delivery_tag)
+
+    def _jsonToSystem(self, system_name, content):
+        doc = json.loads(content)
+        
+        system = System()
+        system.name = system_name
+
+        nodes = 0
+        processors = 0
+        for exec_env in doc.get("ExecutionEnvironment",[]):
+            if system.time == None:
+                system.time = strToDateTime(exec_env["CreationTime"])
+            # guess if this is really a compute node
+            try:
+                if exec_env["TotalInstances"] > 1 or exec_env["LogicalCPUs"] > 32:
+                    nodes = nodes + exec_env["TotalInstances"]
+                    processors = processors + exec_env["TotalInstances"] * exec_env["LogicalCPUs"]
+            except KeyError:
+                pass
+        if processors > 0:
+            system.processors = processors
+            system.procs_per_node = processors / nodes
+
+        for share in doc.get("ComputingShare",[]):
+            queue = Queue(system)
+            try:
+                queue.name = share["Name"]
+            except KeyError:
+                # bad share - ignore it
+                logger.warning("didn't find queue name for share")
+            else:
+                queue.max_wall_time = share.get("MaxWallTime",-1)
+                queue.max_processors = share.get("MaxSlotsPerJob",-1)
+                system.queues[queue.name] = queue
+
+        return system
+
+    def _updateSystem(self, system):
+        self._teraGridToXsede(system)
+        logger.info("updating system %s",system.name)
+        try:
+            #logger.debug(system)
+            db = Glue2Database()
+            db.connect()
+            db.updateSystemInfo(system)
+            db.close()
+        except Exception:
+            traceback.print_exc()
+            #logger.error(content)
+
+    def _teraGridToXsede(self, system):
+        system.name = system.name.replace("teragrid.org","xsede.org")
+        for queue in system.queues.values():
+            queue.system = system.name
+
+#######################################################################################################################
+
+if __name__ == "__main__":
+    daemon = SysInfo()
+    daemon.start()

@@ -1,0 +1,201 @@
+#!/usr/bin/env python
+
+###############################################################################
+#   Copyright 2010 The University of Texas at Austin                          #
+#                                                                             #
+#   Licensed under the Apache License, Version 2.0 (the "License");           #
+#   you may not use this file except in compliance with the License.          #
+#   You may obtain a copy of the License at                                   #
+#                                                                             #
+#       http://www.apache.org/licenses/LICENSE-2.0                            #
+#                                                                             #
+#   Unless required by applicable law or agreed to in writing, software       #
+#   distributed under the License is distributed on an "AS IS" BASIS,         #
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  #
+#   See the License for the specific language governing permissions and       #
+#   limitations under the License.                                            #
+###############################################################################
+#<Predictions>
+#        <Processors>1</Processors>
+#            <RequestedWallTime units='minutes'>15</RequestedWallTime>
+#        <Confidence>90</Confidence>
+#            <Location system='system' queue='queue'/>
+#            <Location system='system' queue='queue'/>
+#            <Format>Raw </Format>  // Can be Raw, Group, LabeledGroup
+#            <NumGroups>3 </NumGroups> // ignored for Raw format.
+#            <Labels>Fast,medium,Slow</Labels> //If set, the format is set to LabeledGroup
+# </Predictions>
+
+import getopt
+import httplib
+import os
+import sys
+
+if "KARNAK_HOST" in os.environ:
+    host = os.environ["KARNAK_HOST"]
+else:
+    host = "karnak.teragrid.org"
+
+if "KARNAK_PORT" in os.environ:
+    port = int(os.environ["KARNAK_PORT"])
+else:
+    port = 80
+
+xmlNamespace = "http://tacc.utexas.edu/karnak/protocol/1.0";
+
+def usage():
+    print("usage: kwouldstart [options] <processors> <requested wall time> <queue@system>+")
+    print("  options:")
+    print("    --help               prints this help message")
+    print("    -t or --text         requests output formatted as plain text (default")
+    print("    -x or --xml          requests output formatted as XML")
+    print("    -j or --json         requests output formatted as JSON")
+    print("    -h or --html         requests output formatted as HTML")
+    print("    -c or --confidence   specifies the percentage for the confidence interval")
+    print("    -g or --group        requests output formatted by group")
+    print("                         group representation is essentially same as LabeledGroup representation")
+    print("                         but does not need label list. It uses ordinal indices starting from 1 to label groups.")
+    print("    -l or --labels       requests output formatted by group and labels by user specified comma separated list. ")
+    print("                         Please note that the comma separated list MUST NOT contain space")
+    print("                         well formatted example : -l Fast,medium,slow ")
+    print("                         incorrectly formatted example: -l Fast, medium, slow")
+    print("                         if both -g and -l are specified, -l overrides -g")
+    print("  arguments:")
+    print("    processors           the number of processing cores the job will use")
+    print("    requested wall time  the amount of wallclock run time the job will request")
+    print("                         format is hours:minutes:seconds")
+    print("    queue                the name of a queue")
+    print("    system               the name of the batch scheduled system")
+
+
+def _getTextBody(args, confidence, displayFormat, nGroups, labels):
+    body = "processors " + args[0] + "\n"
+    hms = args[1].split(":")
+    if len(hms) != 3:
+        print("requestedWallTime should be specified as hh:mm:ss")
+        sys.exit(1)
+    body = body + "requestedWallTime " + args[1] + "\n"
+    if confidence != None:
+        body = body + "confidence " + confidence + "\n"
+    i = 2
+    while i < len(args):
+        toks = args[i].split("@")
+        if len(toks) != 2:
+            print("locations should be specified as queue@system")
+            sys.exit(1)
+        body = body + "location " + toks[1] + " " + toks[0] + "\n"
+        i = i + 1
+
+    body = body + "Format " + displayFormat + "\n"
+    body = body + "NumGroups " + str(nGroups) + "\n"
+    body = body + "Labels " + labels + "\n"
+    return body
+
+def _getXmlBody(args, confidence, displayFormat, nGroups, labels):
+    body = "<Predictions xmlns='"+xmlNamespace+"'>\n"
+    body = body + "  <Processors>" + args[0] + "</Processors>\n"
+    hms = args[1].split(":")
+    if len(hms) != 3:
+        print("requestedWallTime should be specified as hh:mm:ss")
+        sys.exit(1)
+    mins = (int(hms[0])*60*60 + int(hms[1])*60 + int(hms[2])) / 60
+    body = body + "  <RequestedWallTime units='minutes'>" + str(mins) + "</RequestedWallTime>\n"
+    if confidence != None:
+        body = body + "  <Confidence>" + confidence + "</Confidence>\n"
+    i = 2
+    while i < len(args):
+        toks = args[i].split("@")
+        if len(toks) != 2:
+            print("locations should be specified as queue@system")
+            sys.exit(1)
+        body = body + "  <Location system='" + toks[1] + "' queue='" + toks[0] + "'/>\n"
+        i = i + 1
+    body = body + "  <Format>" + displayFormat + "</Format>\n"
+    body = body + "  <NumGroups>" + str(nGroups) + "</NumGroups>\n"
+    body = body + "  <Labels>" + labels + "</Labels>\n"
+    body = body + "</Predictions>\n"
+    return body
+
+
+if __name__ == "__main__":
+    try:
+        opts, args = getopt.gnu_getopt(sys.argv[1:],"txjhc:g:l:",["text","xml", "json", "html","help","confidence=","group=","labels="])
+    except getopt.GetoptError, err:
+        print str(err)
+        usage()
+        sys.exit(2)
+
+    confidence = None
+    format = "txt"
+    headers = {"Content-type": "text/plain",
+               "Accept": "text/plain"}
+    displayFormat ="Raw"
+    nGroups = 3
+    labels = ""
+
+
+    for opt, arg in opts:
+        if opt == "--help":
+            usage()
+            sys.exit(0)
+        elif opt in ("-c", "--confidence"):
+            confidence = arg
+        elif opt in ("-l", "--labels"):
+            labels = arg
+            displayFormat="LabeledGroup"
+        elif opt in ("-g", "--group"):
+            nGroups = arg
+            if displayFormat != "LabeledGroup":
+                displayFormat="Group"
+        elif opt in ("-t", "--text"):
+            # defaults
+            pass
+        elif opt in ("-j", "--json"):
+            format = "json"
+            headers = {"Content-type": "text/xml",
+                       "Accept": "application/json"}
+        elif opt in ("-x", "--xml"):
+            format = "xml"
+            headers = {"Content-type": "text/xml",
+                       "Accept": "text/xml"}
+        elif opt in ("-h", "--html"):
+            format = "html"
+            headers = {"Content-type": "text/html",
+                       "Accept": "text/html"}
+        else:
+            assert False, "unhandled option"
+
+    if len(args) < 3:
+        usage()
+        sys.exit(1)
+
+    if format == "xml":
+        body = _getXmlBody(args,confidence,displayFormat, nGroups, labels)
+    elif format == "json":
+        body = _getXmlBody(args,confidence,displayFormat, nGroups, labels)
+    elif format == "txt":
+        body = _getTextBody(args,confidence,displayFormat, nGroups, labels)
+    else:
+        print(format)
+        print("html format not currently supported")
+        sys.exit(1)
+
+    conn = httplib.HTTPConnection(host,port)
+
+    #print(body)
+    conn.request("POST","/karnak/v2/waittime/prediction/",body,headers)
+    r = conn.getresponse()
+    data = r.read()
+    if r.status != httplib.OK:
+        print("request failed: "+r.reason+" ("+str(r.status)+")")
+        sys.exit(1)
+
+    conn.request("GET",data)
+    r = conn.getresponse()
+    data = r.read()
+    if r.status != httplib.OK:
+        print("request failed: "+r.reason+" ("+str(r.status)+")")
+        sys.exit(1)
+    print(data)
+
+    conn.close()

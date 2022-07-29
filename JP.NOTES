@@ -1,0 +1,3 @@
+$ mysql glue2
+select system,count(*),min(submitTime),max(submitTime) from glue2.started_jobs where hasExperience=0 group by system;
+select count(*) from glue2.started_jobs where hasExperience=0;

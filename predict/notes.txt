@@ -1,0 +1,81 @@
+
+Ranger
+
+max_reservation is the number of jobs at the top of the queue to reserve for
+
+not using -R y
+
+Find first job in queue that it can run, then run it.
+
+how far down does it go?
+
+Tommy mucks with the scheduler to only let a user with a big job run.
+
+
+Moab?
+
+Lonestar:
+
+Backfill?
+
+java karnak.service.predict.TestWaitTimePredictor lonestar.tacc.teragrid.org 2010-02-01T00:00:00 2010-02-14T00:00:00 2010-02-15T00:00:00 ~/karnak/etc/test.props
+
+with simulated start time and k=56, kw=1.0
+    PredictionStatistics for waitTime:
+      predicted: 2424
+      didn't predict: 0
+      mean actual: 408704.8094059406
+      mean expected: 298674.3349834983
+      mean er: 112367.28135313532
+      mean perc er: 29.516163681242688
+      mean ci: 91697.99381873001
+      in interval: 1204
+      mean er / mean act: 0.27493506013903546
+
+with simulated start time and k=20, kw=0.5
+    PredictionStatistics for waitTime:
+      predicted: 2424
+      didn't predict: 0
+      mean actual: 408704.8094059406
+      mean expected: 304824.47689768975
+      mean er: 110155.16501650165
+      mean perc er: 29.918325095070813
+      mean ci: 69272.96719718963
+      in interval: 941
+      mean er / mean act: 0.269522556332562
+
+with simulated start time and k=100, kw=0.5
+    PredictionStatistics for waitTime:
+      predicted: 2424
+      didn't predict: 0
+      mean actual: 408704.8094059406
+      mean expected: 301939.3424092409
+      mean er: 109153.1988448845
+      mean perc er: 29.194117810690237
+      mean ci: 87054.90719191548
+      in interval: 1188
+      mean er / mean act: 0.2670709919062135
+
+with simulated start time and k=100, kw=2.0
+    PredictionStatistics for waitTime:
+      predicted: 2424
+      didn't predict: 0
+      mean actual: 408704.8094059406
+      mean expected: 297600.7553630363
+      mean er: 114489.38902640264
+      mean perc er: 29.830441288710812
+      mean ci: 94631.99836030966
+      in interval: 1248
+      mean er / mean act: 0.2801273349164032
+
+with simulated start time and k=100, kw=10.0
+    PredictionStatistics for waitTime:
+      predicted: 2424
+      didn't predict: 0
+      mean actual: 408704.8094059406
+      mean expected: 297481.90882838285
+      mean er: 114417.12004950496
+      mean perc er: 29.74949864443273
+      mean ci: 94875.36784659911
+      in interval: 1251
+      mean er / mean act: 0.27995051053060077
